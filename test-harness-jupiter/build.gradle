@@ -2,6 +2,9 @@ apply from: "$rootDir/gradle/checkstyle.gradle"
 apply from: "$rootDir/gradle/javadoc.gradle"
 apply from: "$rootDir/gradle/maven.gradle"
 
+project.sourceCompatibility = 1.8
+project.targetCompatibility = 1.8
+
 // to test with JUnit 5
 buildscript {
   repositories {

@@ -6,6 +6,9 @@ plugins {
   id 'org.ajoberstar.grgit' version '1.7.2'
 }
 
+project.sourceCompatibility = 1.8
+project.targetCompatibility = 1.8
+
 def readLastCommitHash() {
   // Same as 'git log -1 --pretty=format:"%h"'.execute().getText()
   org.ajoberstar.grgit.Grgit.open(file('../')).head().abbreviatedId

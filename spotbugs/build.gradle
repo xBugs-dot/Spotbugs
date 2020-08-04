@@ -2,10 +2,19 @@ apply from: "$rootDir/gradle/jacoco.gradle"
 apply from: "$rootDir/gradle/maven.gradle"
 apply from: "$rootDir/gradle/checkstyle.gradle"
 apply from: "$rootDir/gradle/javadoc.gradle"
+apply from: "$rootDir/gradle/jigsaw.gradle"
 
 configurations {
   // used only in distribution. It is not listed in pom.xml, so users like maven plugin don't use this dependency.
   logBinding
+}
+
+// workaround to avoid "Incompatible because this component declares a component compatible with Java 11 and the consumer needed a component compatible with Java 8" error
+// https://github.com/java9-modularity/gradle-modules-plugin/issues/164#issuecomment-665340565
+configurations.each { cfg ->
+  cfg.attributes {
+    attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 8)
+  }
 }
 
 ext {
@@ -57,6 +66,12 @@ sourceSets {
       srcDirs = ['src/gui/test/java']
     }
   }
+}
+
+tasks.compileGuiJava {
+  // gradle-modules-plugin does not support custom compilation task, so configure --release option explicitly
+  // https://github.com/java9-modularity/gradle-modules-plugin/issues/103
+  options.compilerArgs.addAll(['--release', '8'])
 }
 
 dependencies {
@@ -320,11 +335,6 @@ publishing.publications.maven {
     description = "SpotBugs: Because it's easy!"
   }
 }
-
-// Module name should be reverse-DNS (com.github.spotbugs) just like package name
-// http://blog.joda.org/2017/04/java-se-9-jpms-module-naming.html
-ext.moduleName = 'com.github.spotbugs.spotbugs'
-apply from: "$rootDir/gradle/jigsaw.gradle"
 
 task guiTest(type: Test) {
   classpath = project.sourceSets.guiTest.runtimeClasspath

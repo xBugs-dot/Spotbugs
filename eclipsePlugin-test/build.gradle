@@ -1,5 +1,8 @@
 apply from: "$rootDir/gradle/checkstyle.gradle"
 
+project.sourceCompatibility = 1.8
+project.targetCompatibility = 1.8
+
 sourceSets {
   main {
     java {

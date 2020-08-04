@@ -1,6 +1,7 @@
 apply from: "$rootDir/gradle/checkstyle.gradle"
 apply from: "$rootDir/gradle/javadoc.gradle"
 apply from: "$rootDir/gradle/maven.gradle"
+apply from: "$rootDir/gradle/jigsaw.gradle"
 
 dependencies {
   implementation project(':spotbugs')
@@ -30,8 +31,3 @@ publishing.publications.maven {
     description = 'Ant Task to run SpotBugs'
   }
 }
-
-// Module name should be reverse-DNS (com.github.spotbugs) just like package name
-// http://blog.joda.org/2017/04/java-se-9-jpms-module-naming.html
-ext.moduleName = 'com.github.spotbugs.ant'
-apply from: "$rootDir/gradle/jigsaw.gradle"

@@ -1,6 +1,7 @@
 apply from: "$rootDir/gradle/checkstyle.gradle"
 apply from: "$rootDir/gradle/javadoc.gradle"
 apply from: "$rootDir/gradle/maven.gradle"
+apply from: "$rootDir/gradle/jigsaw.gradle"
 
 dependencies {
   api 'com.google.code.findbugs:jsr305:3.0.2'
@@ -60,8 +61,3 @@ publishing.publications.maven {
     description = 'Annotations the SpotBugs tool supports'
   }
 }
-
-// Module name should be reverse-DNS (com.github.spotbugs) just like package name
-// http://blog.joda.org/2017/04/java-se-9-jpms-module-naming.html
-ext.moduleName = 'com.github.spotbugs.annotations'
-apply from: "$rootDir/gradle/jigsaw.gradle"
