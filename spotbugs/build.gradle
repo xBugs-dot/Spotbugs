@@ -1,3 +1,7 @@
+plugins {
+  id "com.github.eirnym.js2p" version "1.0"
+}
+
 apply from: "$rootDir/gradle/jacoco.gradle"
 apply from: "$rootDir/gradle/maven.gradle"
 apply from: "$rootDir/gradle/checkstyle.gradle"
@@ -103,6 +107,13 @@ dependencies {
   guiTestImplementation sourceSets.gui.runtimeClasspath
   guiTestImplementation 'junit:junit:4.13'
   guiTestCompileOnly project(':spotbugs-annotations')
+}
+
+jsonSchema2Pojo {
+  source = files('src/schema/sarif-schema-2.1.0.json')
+  targetPackage = 'edu.umd.cs.findbugs.sarif.schema'
+  annotationStyle = 'gson'
+  usePrimitives = true
 }
 
 clean {
