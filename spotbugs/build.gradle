@@ -95,7 +95,7 @@ dependencies {
   // If they're not repackaged, Ant task will report 'java.lang.ClassNotFoundException: edu.umd.cs.findbugs.annotations.CleanupObligation'
   api project(':spotbugs-annotations')
 
-  api 'com.google.code.gson:gson:2.8.6'
+  api 'com.fasterxml.jackson.core:jackson-databind:2.11.2'
   testImplementation 'junit:junit:4.13'
   testImplementation 'org.apache.ant:ant:1.10.8'
   testImplementation 'org.apache.logging.log4j:log4j-slf4j18-impl:2.13.1'
@@ -111,9 +111,10 @@ dependencies {
 
 jsonSchema2Pojo {
   source = files('src/schema/sarif-schema-2.1.0.json')
-  targetPackage = 'edu.umd.cs.findbugs.sarif.schema'
-  annotationStyle = 'gson'
+  targetPackage = 'edu.umd.cs.findbugs.sarif'
+  annotationStyle = 'jackson2'
   usePrimitives = true
+  generateBuilders = true
 }
 
 clean {

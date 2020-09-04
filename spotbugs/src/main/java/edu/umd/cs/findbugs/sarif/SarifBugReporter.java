@@ -1,15 +1,22 @@
 package edu.umd.cs.findbugs.sarif;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
 import edu.umd.cs.findbugs.*;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import org.json.JSONArray;
-import org.json.JSONWriter;
+import edu.umd.cs.findbugs.ba.SourceFinder;
+import edu.umd.cs.findbugs.sarif.schema.ReportingDescriptor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class SarifBugReporter extends BugCollectionBugReporter {
+    private final Logger logger = LoggerFactory.getLogger(getClass());
+
     public SarifBugReporter(Project project) {
         super(project);
     }
@@ -17,29 +24,36 @@ public class SarifBugReporter extends BugCollectionBugReporter {
     @Override
     public void finish() {
         try {
-            JSONWriter jsonWriter = new JSONWriter(outputStream);
-            jsonWriter.object();
-            jsonWriter.key("version").value("2.1.0").key("$schema").value(
+            JsonGenerator jGenerator = new JsonFactory()
+                    .createGenerator(outputStream);
+            jGenerator.writeStartObject();
+            jGenerator.writeStringField("version", "2.1.0");
+            jGenerator.writeStringField("$schema",
                     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json");
-            processRuns(jsonWriter);
-            jsonWriter.endObject();
+            processRuns(jGenerator);
+            jGenerator.writeEndObject();;
             getBugCollection().bugsPopulated();
+        } catch (IOException e) {
+            logger.warn("Failed to generate the SARIF report", e);
         } finally {
             outputStream.close();
         }
     }
 
-    private void processRuns(@NonNull JSONWriter jsonWriter) {
-        jsonWriter.key("runs").array().object();
+    private void processRuns(@NonNull JsonGenerator jGenerator) throws IOException {
+        jGenerator.writeFieldName("runs");
+        jGenerator.writeStartArray();
+        jGenerator.writeStartObject();
         BugCollectionAnalyser analyser = new BugCollectionAnalyser(getBugCollection());
-        processTool(jsonWriter, analyser.getRules());
-        processInvocations(jsonWriter, analyser.getBaseToId());
-        jsonWriter.key("results").value(analyser.getResults());
-        jsonWriter.key("originalUriBaseIds").value(analyser.getOriginalUriBaseIds());
-        jsonWriter.endObject().endArray();
+        processTool(jGenerator, analyser.getRules());
+        processInvocations(jGenerator, analyser.getBaseToId());
+        jGenerator.writeObjectField("results", analyser.getResults());
+        jGenerator.writeObjectField("originalUriBaseIds", analyser.getOriginalUriBaseIds());
+        jGenerator.writeEndObject();
+        jGenerator.writeEndArray();
     }
 
-    private void processInvocations(JSONWriter jsonWriter, @NonNull Map<URI, String> baseToId) {
+    private void processInvocations(@NonNull JsonGenerator jGenerator, @NonNull Map<URI, String> baseToId) throws IOException {
         List<Notification> configNotifications = new ArrayList<>();
 
         Set<String> missingClasses = getMissingClasses();
@@ -48,38 +62,50 @@ public class SarifBugReporter extends BugCollectionBugReporter {
         }
         if (!missingClasses.isEmpty()) {
             String message = String.format("Classes needed for analysis were missing: %s", missingClasses.toString());
-            configNotifications.add(new Notification("spotbugs-missing-classes", message, Level.ERROR, null));
+            configNotifications.add(new Notification("spotbugs-missing-classes", message, Notification.Level.ERROR, null));
         }
 
         List<Notification> execNotifications = getQueuedErrors().stream()
-                .map(t -> Notification.fromError(t, getProject().getSourceFinder(), baseToId))
+                .map(t -> {
+                    new Notification().withDescriptor(new ReportingDescriptorReference().withId(id)).fromError(t, getProject().getSourceFinder(), baseToId)
+                })
                 .collect(Collectors.toList());
 
         int exitCode = ExitCodes.from(getQueuedErrors().size(), missingClasses.size(), getBugCollection().getCollection().size());
-        Invocation invocation = new Invocation(exitCode,
-                getSignalName(exitCode), exitCode == 0,
-                execNotifications, configNotifications);
-        jsonWriter.key("invocations").array().value(invocation.toJSONObject());
-        jsonWriter.endArray();
+        Invocation invocation = new Invocation().withExitCode(exitCode)
+                .withExitSignalName(getSignalName(exitCode)).withExecutionSuccessful(exitCode == 0)
+                .withToolExecutionNotifications(execNotifications)
+                .withToolConfigurationNotifications(configNotifications);
+        jGenerator.writeFieldName("invocations");
+        jGenerator.writeStartArray();
+        jGenerator.writeObject(invocation);
+        jGenerator.writeEndArray();
     }
 
-    private void processTool(@NonNull JSONWriter jsonWriter, @NonNull JSONArray rules) {
-        jsonWriter.key("tool").object();
-        processExtensions(jsonWriter);
-        jsonWriter.key("driver").object();
-        jsonWriter.key("name").value("SpotBugs");
+    private void processTool(@NonNull JsonGenerator jGenerator, @NonNull List<ReportingDescriptor> rules) throws IOException {
+        jGenerator.writeFieldName("tool");
+        jGenerator.writeStartObject();
+        processExtensions(jGenerator);
+        jGenerator.writeFieldName("driver");
+        jGenerator.writeStartObject();
+        jGenerator.writeStringField("name", "SpotBugs");
         // Eclipse plugin does not follow the semantic-versioning, so use "version" instead of "semanticVersion".
-        jsonWriter.key("version").value(Version.VERSION_STRING);
+        jGenerator.writeStringField("version", Version.VERSION_STRING);
         // SpotBugs refers JVM config to decide which language we use.
-        jsonWriter.key("language").value(Locale.getDefault().getLanguage());
-        jsonWriter.key("rules").value(rules);
-        jsonWriter.endObject().endObject();
+        jGenerator.writeStringField("language", Locale.getDefault().getLanguage());
+        jGenerator.writeObjectField("rules", rules);
+        jGenerator.writeEndObject();
+        jGenerator.writeEndObject();
     }
 
-    private void processExtensions(@NonNull JSONWriter jsonWriter) {
-        jsonWriter.key("extensions").array();
-        DetectorFactoryCollection.instance().plugins().stream().map(Extension::fromPlugin).map(Extension::toJSONObject).forEach(jsonWriter::value);
-        jsonWriter.endArray();
+    private void processExtensions(@NonNull JsonGenerator jGenerator) throws IOException {
+        jGenerator.writeFieldName("extensions");
+        List<Extension> extensions = DetectorFactoryCollection.instance().plugins().stream().map(Extension::fromPlugin).collect(Collectors.toList());
+        jGenerator.writeStartArray(extensions.size());
+        for (Extension extension : extensions) {
+            jGenerator.writeObject(extension);
+        }
+        jGenerator.writeEndArray();
     }
 
     private static String getSignalName(int exitCode) {
@@ -99,5 +125,53 @@ public class SarifBugReporter extends BugCollectionBugReporter {
         }
 
         return list.isEmpty() ? "UNKNOWN" : list.stream().collect(Collectors.joining(","));
+    }
+
+    private Notification toNotification(@NonNull AbstractBugReporter.Error error, @NonNull SourceFinder sourceFinder,
+                                        @NonNull Map<URI, String> baseToId) {
+        String id = String.format("spotbugs-error-%d", error.getSequence());
+        Throwable cause = error.getCause();
+        Notification result = new Notification().withDescriptor(new ReportingDescriptorReference().withId(id)).withMessage(new Message().withText(error.getMessage())).withLevel(Notification.Level.ERROR);
+        if (cause != null) {
+            result = result.withException(toException(cause, sourceFinder, baseToId));
+        }
+        return result;
+    }
+
+    private Exception toException(@NonNull Throwable throwable, @NonNull SourceFinder sourceFinder, @NonNull Map<URI, String> baseToId) {
+        String message = throwable.getMessage();
+        if (message == null) {
+            message = "no message given";
+        }
+
+        List<Throwable> innerThrowables = new ArrayList<>();
+        innerThrowables.add(throwable.getCause());
+        innerThrowables.addAll(Arrays.asList(throwable.getSuppressed()));
+        List<Exception> innerExceptions = innerThrowables.stream()
+                .filter(Objects::nonNull)
+                .map(t -> toException(t, sourceFinder, baseToId))
+                .collect(Collectors.toList());
+        return new Exception()
+                .withKind(throwable.getClass().getName())
+                .withMessage(message)
+                .withStack(toStack(throwable, sourceFinder, baseToId))
+                .withInnerExceptions(innerExceptions);
+    }
+
+    private Stack toStack(@NonNull Throwable throwable, @NonNull SourceFinder sourceFinder, @NonNull Map<URI, String> baseToId) {
+        List<StackFrame> frames = Arrays.stream(Objects.requireNonNull(throwable).getStackTrace()).map(element -> toLocation(
+                element, sourceFinder, baseToId)).collect(
+                Collectors.toList());
+        String message = throwable.getMessage();
+        if (message == null) {
+            message = "no message given";
+        }
+        return new Stack().withMessage(new Message().withText(message)).withFrames(frames);
+    }
+
+    private StackFrame toStackFrame(@NonNull StackTraceElement element, @NonNull SourceFinder sourceFinder,
+                                             @NonNull Map<URI, String> baseToId) {
+        Location location = Location.fromStackTraceElement(element, sourceFinder, baseToId);
+        return new StackFrame(location);
     }
 }
