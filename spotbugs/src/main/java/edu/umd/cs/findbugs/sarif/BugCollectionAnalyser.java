@@ -1,32 +1,16 @@
 package edu.umd.cs.findbugs.sarif;
 
-import edu.umd.cs.findbugs.BugAnnotation;
 import edu.umd.cs.findbugs.BugCollection;
 import edu.umd.cs.findbugs.BugInstance;
 import edu.umd.cs.findbugs.BugPattern;
 import edu.umd.cs.findbugs.BugRankCategory;
 import edu.umd.cs.findbugs.BugRanker;
-import edu.umd.cs.findbugs.ClassAnnotation;
-import edu.umd.cs.findbugs.FieldAnnotation;
-import edu.umd.cs.findbugs.LocalVariableAnnotation;
-import edu.umd.cs.findbugs.MethodAnnotation;
-import edu.umd.cs.findbugs.SourceLineAnnotation;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.ba.SourceFile;
 import edu.umd.cs.findbugs.ba.SourceFinder;
 import org.apache.commons.lang3.StringUtils;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 class BugCollectionAnalyser {
@@ -76,7 +60,7 @@ class BugCollectionAnalyser {
                 .map(placeholder -> placeholder.toArgument(bug.getAnnotations(), bug.getPrimaryClass()))
                 .collect(Collectors.toList());
         List<Location> locations = new ArrayList<>();
-        new LocationHandler().toLocation(bug, sourceFinder, baseToId).ifPresent(locations::add);
+        new LocationHandler().generateLocation(bug, sourceFinder, baseToId).ifPresent(locations::add);
         int bugRank = BugRanker.findRank(bug);
         Result result = new Result().withRuleId(bug.getType()).withRuleIndex(index).withMessage(new Message().withArguments(arguments)).withLocations(
                 locations).withLevel(toLevel(bugRank));
@@ -94,7 +78,7 @@ class BugCollectionAnalyser {
             placeholders.add(new Placeholder(index, key));
             return String.format("{%d}", indexOfPlaceholder);
         });
-        ReportingDescriptor rule = toRule(bugPattern, formattedMessage);
+        ReportingDescriptor rule = generateRule(bugPattern, formattedMessage);
         rules.add(rule);
         indexToPlaceholders.add(placeholders);
 
@@ -105,7 +89,7 @@ class BugCollectionAnalyser {
         return baseToId;
     }
 
-    private Result.Level toLevel(int bugRank) {
+    static Result.Level toLevel(int bugRank) {
         BugRankCategory category = BugRankCategory.getRank(bugRank);
         switch (category) {
         case SCARIEST:
@@ -120,13 +104,13 @@ class BugCollectionAnalyser {
         }
     }
 
-    private ReportingDescriptor toRule(BugPattern bugPattern, String formattedMessage) {
+    private ReportingDescriptor generateRule(BugPattern bugPattern, String formattedMessage) {
         URI helpUri = bugPattern.getUri().orElse(null);
 
         String category = bugPattern.getCategory();
         PropertyBag properties = new PropertyBag();
         if (!StringUtils.isEmpty(category)) {
-            properties.setAdditionalProperty("tags", category);
+            properties.withTags(Collections.singleton(category));
         }
 
         return new ReportingDescriptor()

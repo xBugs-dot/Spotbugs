@@ -2,20 +2,35 @@ package edu.umd.cs.findbugs.sarif;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
-import edu.umd.cs.findbugs.*;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import edu.umd.cs.findbugs.AbstractBugReporter;
+import edu.umd.cs.findbugs.BugCollectionBugReporter;
+import edu.umd.cs.findbugs.DetectorFactoryCollection;
+import edu.umd.cs.findbugs.ExitCodes;
+import edu.umd.cs.findbugs.Plugin;
+import edu.umd.cs.findbugs.Project;
+import edu.umd.cs.findbugs.Version;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.Nullable;
 import edu.umd.cs.findbugs.ba.SourceFinder;
-import edu.umd.cs.findbugs.sarif.schema.ReportingDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class SarifBugReporter extends BugCollectionBugReporter {
     private final Logger logger = LoggerFactory.getLogger(getClass());
+    private final LocationHandler locationHandler = new LocationHandler();
 
     public SarifBugReporter(Project project) {
         super(project);
@@ -23,9 +38,8 @@ public class SarifBugReporter extends BugCollectionBugReporter {
 
     @Override
     public void finish() {
-        try {
-            JsonGenerator jGenerator = new JsonFactory()
-                    .createGenerator(outputStream);
+        try (JsonGenerator jGenerator = new JsonFactory(new JsonMapper())
+                .createGenerator(outputStream)) {
             jGenerator.writeStartObject();
             jGenerator.writeStringField("version", "2.1.0");
             jGenerator.writeStringField("$schema",
@@ -35,8 +49,6 @@ public class SarifBugReporter extends BugCollectionBugReporter {
             getBugCollection().bugsPopulated();
         } catch (IOException e) {
             logger.warn("Failed to generate the SARIF report", e);
-        } finally {
-            outputStream.close();
         }
     }
 
@@ -62,13 +74,11 @@ public class SarifBugReporter extends BugCollectionBugReporter {
         }
         if (!missingClasses.isEmpty()) {
             String message = String.format("Classes needed for analysis were missing: %s", missingClasses.toString());
-            configNotifications.add(new Notification("spotbugs-missing-classes", message, Notification.Level.ERROR, null));
+            configNotifications.add(generateNotification("spotbugs-missing-classes", message, Notification.Level.ERROR, null));
         }
 
         List<Notification> execNotifications = getQueuedErrors().stream()
-                .map(t -> {
-                    new Notification().withDescriptor(new ReportingDescriptorReference().withId(id)).fromError(t, getProject().getSourceFinder(), baseToId)
-                })
+                .map(t -> generateNotification(t, getProject().getSourceFinder(), baseToId))
                 .collect(Collectors.toList());
 
         int exitCode = ExitCodes.from(getQueuedErrors().size(), missingClasses.size(), getBugCollection().getCollection().size());
@@ -100,12 +110,22 @@ public class SarifBugReporter extends BugCollectionBugReporter {
 
     private void processExtensions(@NonNull JsonGenerator jGenerator) throws IOException {
         jGenerator.writeFieldName("extensions");
-        List<Extension> extensions = DetectorFactoryCollection.instance().plugins().stream().map(Extension::fromPlugin).collect(Collectors.toList());
+        List<ToolComponent> extensions = DetectorFactoryCollection.instance().plugins().stream().map(this::createToolComponent).collect(Collectors
+                .toList());
         jGenerator.writeStartArray(extensions.size());
-        for (Extension extension : extensions) {
+        for (ToolComponent extension : extensions) {
             jGenerator.writeObject(extension);
         }
         jGenerator.writeEndArray();
+    }
+
+    private ToolComponent createToolComponent(Plugin plugin) {
+        return new ToolComponent()
+                .withVersion(plugin.getVersion())
+                .withName(plugin.getPluginId())
+                .withShortDescription(new MultiformatMessageString().withText(plugin.getShortDescription()))
+                .withInformationUri(plugin.getWebsiteURI())
+                .withOrganization(plugin.getProvider());
     }
 
     private static String getSignalName(int exitCode) {
@@ -127,18 +147,19 @@ public class SarifBugReporter extends BugCollectionBugReporter {
         return list.isEmpty() ? "UNKNOWN" : list.stream().collect(Collectors.joining(","));
     }
 
-    private Notification toNotification(@NonNull AbstractBugReporter.Error error, @NonNull SourceFinder sourceFinder,
-                                        @NonNull Map<URI, String> baseToId) {
+    private Notification generateNotification(@NonNull AbstractBugReporter.Error error, @NonNull SourceFinder sourceFinder,
+            @NonNull Map<URI, String> baseToId) {
         String id = String.format("spotbugs-error-%d", error.getSequence());
         Throwable cause = error.getCause();
-        Notification result = new Notification().withDescriptor(new ReportingDescriptorReference().withId(id)).withMessage(new Message().withText(error.getMessage())).withLevel(Notification.Level.ERROR);
+        Notification result = new Notification().withDescriptor(new ReportingDescriptorReference().withId(id)).withMessage(new Message().withText(
+                error.getMessage())).withLevel(Notification.Level.ERROR);
         if (cause != null) {
-            result = result.withException(toException(cause, sourceFinder, baseToId));
+            result = result.withException(generateException(cause, sourceFinder, baseToId));
         }
         return result;
     }
 
-    private Exception toException(@NonNull Throwable throwable, @NonNull SourceFinder sourceFinder, @NonNull Map<URI, String> baseToId) {
+    private Exception generateException(@NonNull Throwable throwable, @NonNull SourceFinder sourceFinder, @NonNull Map<URI, String> baseToId) {
         String message = throwable.getMessage();
         if (message == null) {
             message = "no message given";
@@ -149,19 +170,28 @@ public class SarifBugReporter extends BugCollectionBugReporter {
         innerThrowables.addAll(Arrays.asList(throwable.getSuppressed()));
         List<Exception> innerExceptions = innerThrowables.stream()
                 .filter(Objects::nonNull)
-                .map(t -> toException(t, sourceFinder, baseToId))
+                .map(t -> generateException(t, sourceFinder, baseToId))
                 .collect(Collectors.toList());
         return new Exception()
                 .withKind(throwable.getClass().getName())
                 .withMessage(message)
-                .withStack(toStack(throwable, sourceFinder, baseToId))
+                .withStack(generateStack(throwable, sourceFinder, baseToId))
                 .withInnerExceptions(innerExceptions);
     }
 
-    private Stack toStack(@NonNull Throwable throwable, @NonNull SourceFinder sourceFinder, @NonNull Map<URI, String> baseToId) {
-        List<StackFrame> frames = Arrays.stream(Objects.requireNonNull(throwable).getStackTrace()).map(element -> toLocation(
+    private Notification generateNotification(@NonNull String descriptorId, @NonNull String message, @NonNull Notification.Level level,
+            @Nullable Exception exception) {
+        return new Notification()
+                .withDescriptor(new ReportingDescriptorReference().withId(descriptorId))
+                .withMessage(new Message().withText(message))
+                .withLevel(level)
+                .withException(exception);
+    }
+
+    private Stack generateStack(@NonNull Throwable throwable, @NonNull SourceFinder sourceFinder, @NonNull Map<URI, String> baseToId) {
+        List<StackFrame> frames = Arrays.stream(Objects.requireNonNull(throwable).getStackTrace()).map(element -> generateStackFrame(
                 element, sourceFinder, baseToId)).collect(
-                Collectors.toList());
+                        Collectors.toList());
         String message = throwable.getMessage();
         if (message == null) {
             message = "no message given";
@@ -169,9 +199,9 @@ public class SarifBugReporter extends BugCollectionBugReporter {
         return new Stack().withMessage(new Message().withText(message)).withFrames(frames);
     }
 
-    private StackFrame toStackFrame(@NonNull StackTraceElement element, @NonNull SourceFinder sourceFinder,
-                                             @NonNull Map<URI, String> baseToId) {
-        Location location = Location.fromStackTraceElement(element, sourceFinder, baseToId);
-        return new StackFrame(location);
+    private StackFrame generateStackFrame(@NonNull StackTraceElement element, @NonNull SourceFinder sourceFinder,
+            @NonNull Map<URI, String> baseToId) {
+        Location location = locationHandler.generateLocation(element, sourceFinder, baseToId);
+        return new StackFrame().withLocation(location);
     }
 }

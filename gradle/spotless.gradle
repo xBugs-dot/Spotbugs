@@ -6,5 +6,6 @@ spotless {
     eclipse().configFile "${rootProject.projectDir}/gradle/eclipse-formatter.xml"
     endWithNewline()
     lineEndings 'UNIX'
+    targetExclude '**/build/generated-sources/**/*.java'
   }
 }

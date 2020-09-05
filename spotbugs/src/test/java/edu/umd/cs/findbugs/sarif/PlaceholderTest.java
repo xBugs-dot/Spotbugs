@@ -1,5 +1,7 @@
 package edu.umd.cs.findbugs.sarif;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.umd.cs.findbugs.BugInstance;
 import edu.umd.cs.findbugs.BugPattern;
 import edu.umd.cs.findbugs.DetectorFactoryCollection;
@@ -15,8 +17,6 @@ import edu.umd.cs.findbugs.internalAnnotations.DottedClassName;
 import org.apache.bcel.Repository;
 import org.apache.bcel.classfile.JavaClass;
 import org.apache.bcel.classfile.Method;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -24,6 +24,8 @@ import org.junit.Test;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -59,7 +61,7 @@ public class PlaceholderTest {
     }
 
     @Test
-    public void testFormatWithKey() throws ClassNotFoundException {
+    public void testFormatWithKey() throws ClassNotFoundException, JsonProcessingException {
         BugPattern bugPattern = new BugPattern("BUG_TYPE", "abbrev", "category", false, "describing about this bug type...",
                 "describing about this bug type with value {0.givenClass} and {1.name}", "detailText", null, 0);
         DetectorFactoryCollection.instance().registerBugPattern(bugPattern);
@@ -70,19 +72,17 @@ public class PlaceholderTest {
         reporter.finish();
 
         String json = writer.toString();
-        JSONObject jsonObject = new JSONObject(json);
-        JSONObject run = jsonObject.getJSONArray("runs").getJSONObject(0);
-        JSONArray rules = run.getJSONObject("tool").getJSONObject("driver").getJSONArray("rules");
-        String defaultText = rules.getJSONObject(0).getJSONObject("messageStrings").getJSONObject("default").getString("text");
+        ObjectMapper objectMapper = new ObjectMapper();
+        SarifSchema210 schema = objectMapper.readValue(json, SarifSchema210.class);
+        Set<ReportingDescriptor> rules = schema.getRuns().get(0).getTool().getDriver().getRules();
+        String defaultText = rules.stream().findFirst().get().getMessageStrings().getAdditionalProperties().get("default").getText();
         assertThat("key in placeholders are removed",
                 defaultText, is("describing about this bug type with value {0} and {1}"));
 
-        JSONArray results = run.getJSONArray("results");
-        JSONObject message = results.getJSONObject(0).getJSONObject("message");
-        JSONArray arguments = message.getJSONArray("arguments");
+        List<String> arguments = schema.getRuns().get(0).getResults().get(0).getMessage().getArguments();
         assertThat("BugAnnotation has been formatted by the key in placeholder",
-                arguments.getString(0), is("PlaceholderTest"));
+                arguments.get(0), is("PlaceholderTest"));
         assertThat("BugAnnotation has been formatted by the key in placeholder",
-                arguments.getString(1), is("testFormatWithKey"));
+                arguments.get(1), is("testFormatWithKey"));
     }
 }
