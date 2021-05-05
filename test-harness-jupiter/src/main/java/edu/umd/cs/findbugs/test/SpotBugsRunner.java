@@ -29,10 +29,6 @@ public class SpotBugsRunner {
     // TODO let users specify "groupId:artifactId:packaging:version:classifier" like Grape in Groovy
     @Nonnull
     public SpotBugsRunner addAuxClasspathEntry(Path path) {
-        if (runner == null) {
-            throw new IllegalStateException(
-                    "Please call this addAuxClasspathEntry() method in @Before method or test method");
-        }
         runner.addAuxClasspathEntry(path);
         return this;
     }
@@ -48,9 +44,6 @@ public class SpotBugsRunner {
     // TODO let users specify SlashedClassName, then find its file path automatically
     @Nonnull
     public BugCollection performAnalysis(Path... paths) {
-        if (runner == null) {
-            throw new IllegalStateException("Please call this performAnalysis() method in test method");
-        }
         return runner.run(paths).getBugCollection();
     }
 }
